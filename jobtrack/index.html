@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<title>JobTrack</title>
+<meta name="description" content="Open the app, complete today's job, send the summary." />
+<meta name="theme-color" content="#14532D" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="JobTrack" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<link rel="icon" href="icons/icon-192.png" />
+<script>
+  // Resolve and apply the theme before any CSS paints, to avoid a flash of the wrong theme on load.
+  (function () {
+    try {
+      var pref = localStorage.getItem("jobtrack.theme.v1") || "system";
+      var resolved = pref === "system"
+        ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+        : pref;
+      document.documentElement.setAttribute("data-theme", resolved);
+    } catch (e) { /* localStorage unavailable — default light */ }
+  })();
+</script>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<button id="global-timer-banner" class="global-timer-banner" hidden type="button">
+  <span class="active-timer-banner-dot"></span>
+  <span class="active-timer-banner-icon" id="gtb-icon"></span>
+  <span class="active-timer-banner-text" id="gtb-text"></span>
+  <span class="global-timer-banner-arrow">→</span>
+</button>
+
+<div id="update-banner" class="update-banner" hidden>
+  <span class="update-banner-text">A new version of JobTrack is available.</span>
+  <button id="btn-update-now" class="update-banner-btn" type="button">Update</button>
+</div>
+
+<nav id="bottom-nav" class="bottom-nav" hidden>
+  <button class="bottom-nav-item" data-nav="jobs" type="button">
+    <svg viewBox="0 0 24 24" width="21" height="21" fill="none"><rect x="4" y="6" width="16" height="14" rx="2.5" stroke="currentColor" stroke-width="1.8"/><path d="M9 6V5a2 2 0 012-2h2a2 2 0 012 2v1" stroke="currentColor" stroke-width="1.8"/></svg>
+    <span>Jobs</span>
+  </button>
+  <button class="bottom-nav-item" data-nav="new-job" type="button">
+    <svg viewBox="0 0 24 24" width="21" height="21" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    <span>New job</span>
+  </button>
+  <button class="bottom-nav-item" data-nav="customers" type="button">
+    <svg viewBox="0 0 24 24" width="21" height="21" fill="none"><circle cx="9" cy="8" r="3" stroke="currentColor" stroke-width="1.8"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="17" cy="8" r="2.4" stroke="currentColor" stroke-width="1.6"/><path d="M15.5 14.2c2.5.4 4.5 2.6 4.5 5.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    <span>Customers</span>
+  </button>
+  <button class="bottom-nav-item" data-nav="settings" type="button">
+    <svg viewBox="0 0 24 24" width="21" height="21" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 13a7.6 7.6 0 000-2l2-1.5-2-3.5-2.4 1a7.7 7.7 0 00-1.7-1L15 3h-6l-.3 2.5a7.7 7.7 0 00-1.7 1l-2.4-1-2 3.5L4.6 11a7.6 7.6 0 000 2l-2 1.5 2 3.5 2.4-1a7.7 7.7 0 001.7 1L9 21h6l.3-2.5a7.7 7.7 0 001.7-1l2.4 1 2-3.5-2-1.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+    <span>Settings</span>
+  </button>
+</nav>
+
+<main id="app" class="app"></main>
+
+<!-- Templates -->
+<template id="tpl-lock">
+  <section class="screen screen-lock">
+    <div class="lock-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none"><rect x="5" y="11" width="14" height="9" rx="2.5" stroke="currentColor" stroke-width="1.8"/><path d="M8 11V8a4 4 0 018 0v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </div>
+    <h1 class="lock-title">JobTrack</h1>
+    <p class="lock-sub">Enter your access code to continue.</p>
+    <input id="lock-code" class="field-input lock-input" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Access code" />
+    <button id="btn-unlock" class="btn-primary" type="button">Unlock</button>
+  </section>
+</template>
+
+<template id="tpl-list">
+  <section class="screen screen-list">
+    <header class="list-header">
+      <span class="list-title">JobTrack</span>
+      <button class="btn-icon btn-icon-accent" data-action="header-new-job" aria-label="New job" type="button">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+
+    <div class="list-tabs">
+      <button class="list-tab list-tab-active" data-tab="active" type="button">Active</button>
+      <button class="list-tab" data-tab="completed" type="button">Completed</button>
+    </div>
+
+    <div id="job-list" class="job-list"></div>
+
+    <div id="list-empty" class="list-empty" hidden>
+      <p class="list-empty-title">No jobs here yet</p>
+      <p class="list-empty-body">Tap + to start your next job.</p>
+    </div>
+
+    <p class="list-footer">Powered by SouthWorx</p>
+  </section>
+</template>
+
+<template id="tpl-job-card">
+  <button class="job-card" type="button">
+    <span class="job-card-dot"></span>
+    <span class="job-card-body">
+      <span class="job-card-customer"></span>
+      <span class="job-card-vehicle"></span>
+    </span>
+    <span class="job-card-pill"></span>
+  </button>
+</template>
+
+<template id="tpl-part-row">
+  <div class="part-row">
+    <button class="part-row-body" data-action="edit-part" type="button">
+      <span class="part-row-desc"></span>
+      <span class="part-row-meta"></span>
+    </button>
+    <button class="part-row-remove" data-action="remove-part" aria-label="Remove part" type="button">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</template>
+
+<template id="tpl-form">
+  <section class="screen screen-form">
+    <header class="screen-header">
+      <button class="btn-icon" data-action="go-list" aria-label="Cancel and go to job list" type="button">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </button>
+      <span class="screen-eyebrow">New job</span>
+      <span class="header-spacer"></span>
+    </header>
+
+    <div class="form-body">
+      <button class="btn-secondary" id="btn-use-template" type="button" hidden>Start from a template</button>
+      <label class="field">
+        <span class="field-label">Customer</span>
+        <div class="field-suggest-wrap">
+          <input id="f-customer" class="field-input" type="text" inputmode="text" autocomplete="off" placeholder="e.g. Sarah Lewis" />
+          <div id="customer-suggest" class="suggest-list" hidden></div>
+        </div>
+      </label>
+      <label class="field">
+        <span class="field-label"><span data-term-label="vehicle">Vehicle</span> <em>(optional)</em></span>
+        <div class="field-suggest-wrap">
+          <input id="f-vehicle" class="field-input" type="text" inputmode="text" autocomplete="off" data-term-placeholder="vehiclePh" placeholder="e.g. Ford Transit" />
+          <div id="vehicle-suggest" class="suggest-list" hidden></div>
+        </div>
+      </label>
+      <label class="field">
+        <span class="field-label"><span data-term-label="registration">Registration</span> <em>(optional)</em></span>
+        <input id="f-reg" class="field-input field-input-caps" type="text" inputmode="text" autocomplete="off" data-term-placeholder="regPh" placeholder="e.g. AB12 CDE" />
+      </label>
+      <label class="field">
+        <span class="field-label">What's the job? <em>(optional)</em></span>
+        <div class="chip-row" id="jobtype-chips">
+          <button class="chip" type="button" data-chip="Service">Service</button>
+          <button class="chip" type="button" data-chip="Repair">Repair</button>
+          <button class="chip" type="button" data-chip="Diagnostic">Diagnostic</button>
+          <button class="chip" type="button" data-chip="MOT">MOT</button>
+          <button class="chip" type="button" data-chip="Breakdown">Breakdown</button>
+        </div>
+        <input id="f-jobtype" class="field-input" type="text" inputmode="text" autocomplete="off" placeholder="e.g. Service" />
+      </label>
+      <label class="field">
+        <span class="field-label">Job number <em>(optional)</em></span>
+        <input id="f-jobnum" class="field-input" type="text" inputmode="text" autocomplete="off" placeholder="e.g. 1042" />
+      </label>
+      <label class="field">
+        <span class="field-label">Site / address <em>(optional)</em></span>
+        <input id="f-site" class="field-input" type="text" inputmode="text" autocomplete="off" placeholder="e.g. Smith Farm, Winchester" />
+      </label>
+      <label class="field">
+        <span class="field-label">Customer phone <em>(optional)</em></span>
+        <input id="f-phone" class="field-input" type="text" inputmode="tel" autocomplete="off" placeholder="e.g. 07700 900123" />
+      </label>
+      <label class="field">
+        <span class="field-label">Customer email <em>(optional)</em></span>
+        <input id="f-email" class="field-input" type="text" inputmode="email" autocomplete="off" placeholder="e.g. sarah@example.com" />
+      </label>
+      <label class="field">
+        <span class="field-label">Hours / miles <em>(optional)</em></span>
+        <input id="f-hours" class="field-input" type="text" inputmode="text" autocomplete="off" placeholder="e.g. 1,204 hrs or 84,502 mi" />
+        <span class="field-hint" id="f-hours-hint"></span>
+      </label>
+      <label class="field">
+        <span class="field-label">Additional notes <em>(optional)</em></span>
+        <textarea id="f-description" class="field-textarea" rows="3" placeholder="Anything worth knowing before you start — what the customer said, access instructions, etc."></textarea>
+      </label>
+    </div>
+
+    <div class="form-footer">
+      <button id="btn-save-job" class="btn-primary" type="button" disabled>Save job</button>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-detail">
+  <section class="screen screen-detail">
+    <header class="screen-header">
+      <button class="btn-icon" data-action="go-list" aria-label="Back to job list" type="button">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="detail-header-mid">
+        <span class="screen-eyebrow" id="detail-jobnum"></span>
+        <span class="detail-customer" id="detail-customer"></span>
+      </span>
+      <span class="status-pill" id="detail-status-pill"></span>
+    </header>
+
+    <div class="timer-hero" id="timer-hero">
+      <div class="timer-hero-eyebrow" id="timer-hero-eyebrow">Labour time</div>
+      <div class="timer-hero-value" id="timer-hero-value">00:00:00</div>
+      <div class="timer-hero-sub" id="timer-hero-sub"></div>
+    </div>
+
+    <div class="detail-info">
+      <div class="detail-info-header">
+        <span class="detail-info-header-label">Job details</span>
+        <button class="btn-icon-ghost" data-action="delete-job" aria-label="Delete this job" type="button">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m2 0v13a2 2 0 01-2 2H8a2 2 0 01-2-2V7h12z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Delete</span>
+        </button>
+        <button class="btn-icon-ghost" data-action="repeat-job" aria-label="Repeat this job" type="button">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M4 4v5h5M20 20v-5h-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 15a7 7 0 0012.6 1.5M18.5 9A7 7 0 005.9 7.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Repeat</span>
+        </button>
+        <button class="btn-icon-ghost" data-action="edit-details" aria-label="Edit job details" type="button">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          <span>Edit</span>
+        </button>
+      </div>
+      <div class="detail-row" id="detail-vehicle-row">
+        <span class="detail-row-k" data-term-label="vehicle">Vehicle</span>
+        <span class="detail-row-v" id="detail-vehicle"></span>
+      </div>
+      <div class="detail-row" id="detail-site-row">
+        <span class="detail-row-k">Site</span>
+        <span class="detail-row-v" id="detail-site"></span>
+      </div>
+      <div class="detail-row" id="detail-jobtype-row">
+        <span class="detail-row-k">Job type</span>
+        <span class="detail-row-v" id="detail-jobtype"></span>
+      </div>
+      <div class="detail-row" id="detail-hours-row">
+        <span class="detail-row-k">Hours / miles</span>
+        <span class="detail-row-v" id="detail-hours"></span>
+      </div>
+
+      <div id="quick-actions" class="quick-actions" hidden>
+        <a id="quick-call" class="quick-action-btn" hidden>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M22 16.9v3a2 2 0 01-2.2 2 19.8 19.8 0 01-8.6-3.1 19.5 19.5 0 01-6-6A19.8 19.8 0 012.1 4.2 2 2 0 014.1 2h3a2 2 0 012 1.7c.1.9.3 1.8.6 2.7a2 2 0 01-.4 2.1L8 9.9a16 16 0 006 6l1.4-1.4a2 2 0 012.1-.4c.9.3 1.8.5 2.7.6a2 2 0 011.8 2.2z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          <span>Call</span>
+        </a>
+        <a id="quick-navigate" class="quick-action-btn" hidden target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0118 0z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="10" r="3" stroke="currentColor" stroke-width="1.6"/></svg>
+          <span>Navigate</span>
+        </a>
+        <a id="quick-email" class="quick-action-btn" hidden>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" stroke-width="1.6"/><path d="M3.5 6.5L12 13l8.5-6.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+          <span>Email</span>
+        </a>
+      </div>
+    </div>
+
+    <div id="detail-description-block" class="detail-description-block" hidden>
+      <p class="detail-description-title">Additional notes</p>
+      <p class="detail-description-text" id="detail-description-text"></p>
+    </div>
+
+    <div id="visits-history" class="visits-history" hidden>
+      <p class="visits-history-title">Previous visits</p>
+      <div id="visits-history-list"></div>
+    </div>
+
+    <div class="detail-grid">
+      <div class="parts-block">
+        <button class="tile tile-wide tile-parts" data-action="toggle-parts" type="button">
+          <span class="tile-icon">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 3v9m0 0l8-4.5M12 12L4 7.5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="tile-label" data-term-label="parts">Parts</span>
+          <span class="tile-count" id="count-parts"></span>
+          <svg class="tile-chevron" id="parts-chevron" viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+
+        <div id="parts-panel" class="parts-panel" hidden>
+          <div id="parts-panel-list" class="parts-panel-list"></div>
+          <button class="parts-panel-add" data-action="add-part" id="add-part-btn" type="button">+ Add a part</button>
+        </div>
+      </div>
+
+      <button class="tile tile-wide" data-action="written-note" type="button">
+        <span class="tile-icon">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M4 20l1-4.2L15.6 5.2a1.6 1.6 0 012.3 0l1 1a1.6 1.6 0 010 2.3L8.2 19 4 20z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        </span>
+        <span class="tile-label">Work done</span>
+      </button>
+
+      <button class="tile tile-wide" data-action="recommendations" type="button">
+        <span class="tile-icon">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M12 9v4m0 4h.01M10.3 3.86L1.82 18a1.5 1.5 0 001.3 2.25h17.76a1.5 1.5 0 001.3-2.25L13.7 3.86a1.5 1.5 0 00-2.6 0z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <span class="tile-label">Further work</span>
+        <span class="tile-count" id="count-recommendations"></span>
+      </button>
+    </div>
+
+    <div class="action-bar">
+      <button class="action-btn action-btn-travel" data-action="toggle-travel" type="button">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M5 17h1.5a2.5 2.5 0 005 0H14a2.5 2.5 0 005 0H20a1 1 0 001-1v-3.6a1 1 0 00-.29-.7l-2.5-2.5A1 1 0 0017.5 9H15V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        <span>Travel</span>
+      </button>
+      <button class="action-btn action-btn-labour" data-action="toggle-labour" type="button">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6-6a6 6 0 0 1 -8 -8l3.5 3.5" /></svg>
+        <span>Labour</span>
+      </button>
+      <button class="action-btn action-btn-complete" data-action="go-complete" type="button">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Complete</span>
+      </button>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-summary">
+  <section class="screen screen-summary">
+    <header class="screen-header">
+      <span class="screen-eyebrow">Job summary</span>
+      <span class="header-spacer"></span>
+      <button class="btn-icon" data-action="cancel-complete" aria-label="Cancel" type="button">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+
+    <div class="summary-sheet" id="summary-sheet"></div>
+
+    <div class="summary-actions">
+      <button class="btn-chip" data-action="copy" type="button">Copy</button>
+      <button class="btn-chip" data-action="print" type="button">Print</button>
+      <button class="btn-chip" data-action="share" type="button">Share</button>
+      <button class="btn-chip" data-action="email" type="button">Email</button>
+      <button class="btn-chip" data-action="pdf" type="button">Export PDF</button>
+    </div>
+    <p class="summary-hint">Email opens your mail app with the text filled in — for the PDF version, use Export PDF first, then attach it yourself.</p>
+
+    <div class="summary-footer">
+      <button id="btn-mark-complete" class="btn-primary" type="button">Mark job complete</button>
+      <button id="btn-cancel-complete" class="btn-secondary" type="button">Cancel</button>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-customers">
+  <section class="screen screen-list">
+    <header class="list-header">
+      <span class="list-title">Customers</span>
+      <button class="btn-icon btn-icon-accent" data-action="new-customer" aria-label="New customer" type="button">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+    <div id="customers-list" class="job-list"></div>
+    <div id="customers-empty" class="list-empty" hidden>
+      <p class="list-empty-title">No customers yet</p>
+      <p class="list-empty-body">They'll show up here once you've saved a job.</p>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-customer-detail">
+  <section class="screen screen-detail">
+    <header class="screen-header">
+      <button class="btn-icon" data-action="go-customers" aria-label="Back to customers" type="button">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="detail-header-mid">
+        <span class="screen-eyebrow">Customer</span>
+        <span class="detail-customer" id="cd-name"></span>
+      </span>
+      <button class="btn-icon-ghost" data-action="new-job-for-customer" aria-label="New job for this customer" type="button">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <span>New job</span>
+      </button>
+    </header>
+
+    <div id="cd-quick-actions" class="quick-actions" hidden>
+      <a id="cd-call" class="quick-action-btn" hidden>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M22 16.9v3a2 2 0 01-2.2 2 19.8 19.8 0 01-8.6-3.1 19.5 19.5 0 01-6-6A19.8 19.8 0 012.1 4.2 2 2 0 014.1 2h3a2 2 0 012 1.7c.1.9.3 1.8.6 2.7a2 2 0 01-.4 2.1L8 9.9a16 16 0 006 6l1.4-1.4a2 2 0 012.1-.4c.9.3 1.8.5 2.7.6a2 2 0 011.8 2.2z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        <span>Call</span>
+      </a>
+      <a id="cd-navigate" class="quick-action-btn" hidden target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0118 0z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="10" r="3" stroke="currentColor" stroke-width="1.6"/></svg>
+        <span>Navigate</span>
+      </a>
+      <a id="cd-email" class="quick-action-btn" hidden>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" stroke-width="1.6"/><path d="M3.5 6.5L12 13l8.5-6.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        <span>Email</span>
+      </a>
+    </div>
+
+    <div class="detail-info">
+      <p class="visits-history-title" data-term-label="equipment">Equipment</p>
+      <div id="cd-vehicles"></div>
+    </div>
+
+    <div class="visits-history">
+      <p class="visits-history-title">Previous jobs</p>
+      <div id="cd-jobs"></div>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-templates">
+  <section class="screen screen-list">
+    <header class="list-header">
+      <button class="btn-icon" data-action="go-settings" aria-label="Back to settings" type="button">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="list-title">Job templates</span>
+      <button class="btn-icon btn-icon-accent" data-action="new-template" aria-label="New template" type="button">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+    <div id="templates-list" class="job-list"></div>
+    <div id="templates-empty" class="list-empty" hidden>
+      <p class="list-empty-title">No templates yet</p>
+      <p class="list-empty-body">Save a job type and default notes here, then start new jobs from it in one tap.</p>
+    </div>
+  </section>
+</template>
+
+<template id="tpl-template-row">
+  <button class="job-card" type="button">
+    <span class="job-card-main">
+      <span class="job-card-customer template-row-name"></span>
+      <span class="job-card-vehicle template-row-type"></span>
+    </span>
+  </button>
+</template>
+
+<!-- Add/edit template sheet -->
+<div id="sheet-template" class="sheet-overlay" hidden>
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h3 class="sheet-title" id="template-sheet-title">New template</h3>
+    <label class="field">
+      <span class="field-label">Template name</span>
+      <input id="tpl-name" class="field-input" type="text" autocomplete="off" placeholder="e.g. Annual baler service" />
+    </label>
+    <label class="field">
+      <span class="field-label">Job type <em>(optional)</em></span>
+      <div class="chip-row" id="tpl-jobtype-chips">
+        <button class="chip" type="button" data-chip="Service">Service</button>
+        <button class="chip" type="button" data-chip="Repair">Repair</button>
+        <button class="chip" type="button" data-chip="Diagnostic">Diagnostic</button>
+        <button class="chip" type="button" data-chip="MOT">MOT</button>
+        <button class="chip" type="button" data-chip="Breakdown">Breakdown</button>
+      </div>
+      <input id="tpl-jobtype" class="field-input" type="text" inputmode="text" autocomplete="off" placeholder="e.g. Service" />
+    </label>
+    <label class="field">
+      <span class="field-label">Default notes <em>(optional)</em></span>
+      <textarea id="tpl-notes" class="field-textarea" rows="4" placeholder="Anything that applies every time — standard checks, access instructions, etc."></textarea>
+    </label>
+    <div class="sheet-actions">
+      <button class="btn-secondary" data-action="close-sheet" type="button">Cancel</button>
+      <button class="btn-primary" id="btn-save-template" type="button">Save template</button>
+    </div>
+    <button class="btn-secondary btn-danger-ghost" id="btn-delete-template" type="button" hidden>Delete template</button>
+  </div>
+</div>
+
+<!-- Pick a template sheet (from New Job form) -->
+<div id="sheet-template-pick" class="sheet-overlay" hidden>
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h3 class="sheet-title">Start from a template</h3>
+    <div id="template-pick-list" class="parts-panel-list"></div>
+    <div class="sheet-actions">
+      <button class="btn-secondary" data-action="close-sheet" type="button">Cancel</button>
+    </div>
+  </div>
+</div>
+
+
+<template id="tpl-settings">
+  <section class="screen screen-settings">
+    <header class="screen-header">
+      <button class="btn-icon" data-action="go-list" aria-label="Back to job list" type="button">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="screen-eyebrow">Settings</span>
+      <span class="header-spacer"></span>
+    </header>
+
+    <div class="settings-section">
+      <p class="settings-section-title">Appearance</p>
+      <div class="theme-chip-row" id="theme-chip-row">
+        <button class="theme-chip" data-theme-choice="system" type="button">System</button>
+        <button class="theme-chip" data-theme-choice="light" type="button">Light</button>
+        <button class="theme-chip" data-theme-choice="dark" type="button">Dark</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <p class="settings-section-title">Business details</p>
+      <p class="settings-section-hint">Shown on every job summary, email and PDF, so customers know who it's from.</p>
+      <label class="field">
+        <span class="field-label">Business or your name</span>
+        <input id="s-business-name" class="field-input" type="text" autocomplete="off" placeholder="e.g. Lewis Mobile Mechanics" />
+      </label>
+      <label class="field">
+        <span class="field-label">Phone <em>(optional)</em></span>
+        <input id="s-business-phone" class="field-input" type="text" inputmode="tel" autocomplete="off" placeholder="e.g. 07700 900123" />
+      </label>
+      <label class="field">
+        <span class="field-label">Email <em>(optional)</em></span>
+        <input id="s-business-email" class="field-input" type="text" inputmode="email" autocomplete="off" placeholder="e.g. you@example.com" />
+      </label>
+      <button id="btn-save-business" class="btn-primary" type="button">Save details</button>
+    </div>
+
+    <div class="settings-section">
+      <p class="settings-section-title">Data</p>
+      <p class="settings-section-hint">Everything's stored only on this device, in this browser. There's no cloud backup yet.</p>
+      <p class="settings-data-count" id="settings-data-count"></p>
+      <button class="btn-secondary" data-action="export-backup" type="button">Export a backup file</button>
+      <button class="btn-secondary" data-action="export-csv" type="button">Export CSV (hours)</button>
+      <button class="btn-secondary" data-action="restore-backup" type="button">Restore from a backup file</button>
+      <input id="restore-file-input" type="file" accept="application/json,.json" hidden />
+      <button class="btn-secondary btn-danger-ghost" data-action="clear-completed" type="button">Clear completed jobs</button>
+      <button class="btn-secondary btn-danger-ghost" data-action="clear-all" type="button">Clear all data</button>
+    </div>
+
+    <div class="settings-section">
+      <p class="settings-section-title">Job numbering</p>
+      <p class="settings-section-hint">When on, new jobs get a number automatically — still editable per job if you need to override it.</p>
+      <div class="theme-chip-row">
+        <button class="numbering-chip" id="jn-off" type="button">Off</button>
+        <button class="numbering-chip" id="jn-on" type="button">Auto-number</button>
+      </div>
+      <label class="field">
+        <span class="field-label">Prefix <em>(optional)</em></span>
+        <input id="jn-prefix" class="field-input" type="text" autocomplete="off" placeholder="e.g. JT-" />
+      </label>
+      <label class="field">
+        <span class="field-label">Next number</span>
+        <input id="jn-next" class="field-input" type="number" inputmode="numeric" min="1" />
+      </label>
+      <button class="btn-primary" id="btn-save-jobnumbering" type="button">Save</button>
+    </div>
+
+    <div class="settings-section">
+      <p class="settings-section-title">Trade</p>
+      <p class="settings-section-hint">Changes what Vehicle, Registration and Parts are called throughout the app to match your trade. Nothing you've already entered is affected.</p>
+      <div class="theme-chip-row" id="trade-chip-row">
+        <button class="trade-chip" data-trade-choice="mechanic" type="button">Mechanic</button>
+        <button class="trade-chip" data-trade-choice="ag" type="button">Ag / plant</button>
+        <button class="trade-chip" data-trade-choice="electrician" type="button">Electrician</button>
+        <button class="trade-chip" data-trade-choice="plumber" type="button">Plumber</button>
+        <button class="trade-chip" data-trade-choice="general" type="button">General</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <p class="settings-section-title">Job templates</p>
+      <p class="settings-section-hint">Save defaults for jobs you do again and again — job type and standard notes — so you can start a new job in one tap.</p>
+      <button class="btn-secondary" data-action="manage-templates" type="button">Manage templates</button>
+    </div>
+
+    <div class="settings-section">
+      <p class="settings-section-title">Access</p>
+      <p class="settings-section-hint">Lock the app again — your job data stays exactly as it is, you'll just need the access code to get back in.</p>
+      <button class="btn-secondary" data-action="lock-app" type="button">Lock this app</button>
+    </div>
+  </section>
+</template>
+
+<!-- Add Part sheet -->
+<div id="sheet-part" class="sheet-overlay" hidden>
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h3 class="sheet-title" id="part-sheet-title">Add part</h3>
+    <label class="field">
+      <span class="field-label"><span data-term-label="part">Part</span> number</span>
+      <input id="p-number" class="field-input" type="text" autocomplete="off" />
+    </label>
+    <label class="field">
+      <span class="field-label">Description</span>
+      <input id="p-desc" class="field-input" type="text" autocomplete="off" />
+    </label>
+    <label class="field">
+      <span class="field-label">Quantity</span>
+      <input id="p-qty" class="field-input" type="number" inputmode="numeric" min="1" value="1" />
+    </label>
+    <div class="sheet-actions">
+      <button class="btn-secondary" data-action="close-sheet" type="button">Cancel</button>
+      <button class="btn-primary" id="btn-save-part" type="button">Add part</button>
+    </div>
+  </div>
+</div>
+
+<!-- Work done sheet -->
+<div id="sheet-note" class="sheet-overlay" hidden>
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h3 class="sheet-title">Work done</h3>
+    <textarea id="note-text" class="field-textarea" rows="8" placeholder="Describe the work…"></textarea>
+    <div class="sheet-actions">
+      <button class="btn-secondary" data-action="close-sheet" type="button">Cancel</button>
+      <button class="btn-primary" id="btn-save-note" type="button">Save note</button>
+    </div>
+  </div>
+</div>
+
+<!-- Further work / recommendations sheet -->
+<div id="sheet-recommendations" class="sheet-overlay" hidden>
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h3 class="sheet-title">Further work</h3>
+    <p class="sheet-subtitle">Anything worth flagging for next time — worn parts, things to keep an eye on.</p>
+    <textarea id="recommendations-text" class="field-textarea" rows="8" placeholder="e.g. O/S front tyre badly worn, recommend replacement before next service."></textarea>
+    <div class="sheet-actions">
+      <button class="btn-secondary" data-action="close-sheet" type="button">Cancel</button>
+      <button class="btn-primary" id="btn-save-recommendations" type="button">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- New customer sheet -->
+<div id="sheet-new-customer" class="sheet-overlay" hidden>
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h3 class="sheet-title">New customer</h3>
+    <label class="field">
+      <span class="field-label">Name</span>
+      <input id="nc-name" class="field-input" type="text" autocomplete="off" placeholder="e.g. Sarah Lewis" />
+    </label>
+    <label class="field">
+      <span class="field-label">Phone <em>(optional)</em></span>
+      <input id="nc-phone" class="field-input" type="text" inputmode="tel" autocomplete="off" />
+    </label>
+    <label class="field">
+      <span class="field-label">Email <em>(optional)</em></span>
+      <input id="nc-email" class="field-input" type="text" inputmode="email" autocomplete="off" />
+    </label>
+    <label class="field">
+      <span class="field-label">Site / address <em>(optional)</em></span>
+      <input id="nc-site" class="field-input" type="text" autocomplete="off" />
+    </label>
+    <div class="sheet-actions">
+      <button class="btn-secondary" data-action="close-sheet" type="button">Cancel</button>
+      <button class="btn-primary" id="btn-save-customer" type="button">Save customer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit job details sheet -->
+<div id="sheet-edit" class="sheet-overlay" hidden>
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h3 class="sheet-title">Edit job details</h3>
+    <label class="field">
+      <span class="field-label">Customer</span>
+      <input id="e-customer" class="field-input" type="text" autocomplete="off" />
+    </label>
+    <label class="field">
+      <span class="field-label"><span data-term-label="vehicle">Vehicle</span> <em>(optional)</em></span>
+      <input id="e-vehicle" class="field-input" type="text" autocomplete="off" />
+    </label>
+    <label class="field">
+      <span class="field-label"><span data-term-label="registration">Registration</span> <em>(optional)</em></span>
+      <input id="e-reg" class="field-input field-input-caps" type="text" autocomplete="off" />
+    </label>
+    <label class="field">
+      <span class="field-label">What's the job? <em>(optional)</em></span>
+      <input id="e-jobtype" class="field-input" type="text" autocomplete="off" placeholder="e.g. Service" />
+    </label>
+    <label class="field">
+      <span class="field-label">Job number <em>(optional)</em></span>
+      <input id="e-jobnum" class="field-input" type="text" autocomplete="off" />
+    </label>
+    <label class="field">
+      <span class="field-label">Site / address <em>(optional)</em></span>
+      <input id="e-site" class="field-input" type="text" autocomplete="off" />
+    </label>
+    <label class="field">
+      <span class="field-label">Customer phone <em>(optional)</em></span>
+      <input id="e-phone" class="field-input" type="text" autocomplete="off" />
+    </label>
+    <label class="field">
+      <span class="field-label">Customer email <em>(optional)</em></span>
+      <input id="e-email" class="field-input" type="text" autocomplete="off" />
+    </label>
+    <label class="field">
+      <span class="field-label">Hours / miles <em>(optional)</em></span>
+      <input id="e-hours" class="field-input" type="text" autocomplete="off" placeholder="e.g. 1,204 hrs or 84,502 mi" />
+    </label>
+    <label class="field">
+      <span class="field-label">Additional notes <em>(optional)</em></span>
+      <textarea id="e-description" class="field-textarea" rows="3"></textarea>
+    </label>
+    <div class="sheet-actions">
+      <button class="btn-secondary" data-action="close-sheet" type="button">Cancel</button>
+      <button class="btn-primary" id="btn-save-edit" type="button">Save changes</button>
+    </div>
+  </div>
+</div>
+
+<script src="vendor/jspdf.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
